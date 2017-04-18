@@ -38,6 +38,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -78,6 +79,21 @@ type TunnelConfig struct {
 
 	// AllowedPorts is a list of allowed UDP and TCP ports.
 	AllowedPorts []uint16
+
+	// PacketMagic is used to generate a sequence of bytes that is prepended to
+	// every TUN packet sent over UDP. Only inbound messages carrying the
+	// magic sequence will be accepted. This mechanism is used as a trivial way
+	// to protect against denial-of-service attacks by ensuring the server only
+	// responds to remote IP addresses that are validated.
+	//
+	// This validation mechanism is only intended to protect against adversaries
+	// with the ability to create arbitrary spoof UDP packets. It does not
+	// protect against man-in-the-middle (MITM) attacks since any attacker with
+	// the ability to intercept traffic already has the capability to block
+	// communication between the client and server.
+	//
+	// This value must match on both the client and server.
+	PacketMagic string
 }
 
 type direction byte
@@ -218,13 +234,14 @@ func main() {
 		}()
 	}
 
+	magic := md5.Sum([]byte(config.PacketMagic))
 	pf := newPortFilter(config.AllowedPorts)
 
 	// Handle outbound traffic.
 	go func() {
 		b := make([]byte, 1<<16)
 		for {
-			n, err := iface.Read(b)
+			n, err := iface.Read(b[len(magic):])
 			if err != nil {
 				if isDone(ctx) {
 					return
@@ -232,17 +249,19 @@ func main() {
 				log.Printf("tun read error: %v", err)
 				continue
 			}
+			n += copy(b, magic[:])
+			p := b[len(magic):n]
 
 			raddr := atomicRaddr.Load().(*net.UDPAddr)
-			if pf.Filter(b[:n], outbound) || raddr == nil {
-				logPacket(b[:n], outbound, true)
+			if pf.Filter(p, outbound) || raddr == nil {
+				logPacket(p, outbound, true)
 				continue
 			}
 
 			if _, err := cn.WriteToUDP(b[:n], raddr); err != nil {
 				log.Printf("net write error: %v", err)
 			}
-			logPacket(b[:n], outbound, false)
+			logPacket(p, outbound, false)
 		}
 	}()
 
@@ -258,28 +277,32 @@ func main() {
 				log.Printf("net read error: %v", err)
 				continue
 			}
+			if !bytes.HasPrefix(b, magic[:]) {
+				log.Printf("invalid packet from remote address: %v", raddr)
+				continue
+			}
+			p := b[len(magic):n]
 
-			if pf.Filter(b[:n], inbound) {
-				logPacket(b[:n], inbound, true)
+			if pf.Filter(p, inbound) {
+				logPacket(p, inbound, true)
 				continue
 			}
 
 			if serverMode {
-				// TODO(dsnet): There is no security here that verifies that
-				// the new IP address is really the remote endpoint.
-				// It is trivial for an attacker to send spoof packets that
-				// redirect the UDP traffic to some other address.
-				// The extent of the damage done is dropped connections.
+				// We assume a matching magic prefix is sufficient to validate
+				// that the new IP is really the remote endpoint.
+				// We assume that any adversary capable of performing a replay
+				// attack already has the power to disrupt communication.
 				if !equalAddr(atomicRaddr.Load().(*net.UDPAddr), raddr) {
 					atomicRaddr.Store(raddr)
 					log.Printf("switching remote address: %v", raddr)
 				}
 			}
 
-			if _, err := iface.Write(b[:n]); err != nil {
+			if _, err := iface.Write(p); err != nil {
 				log.Printf("tun write error: %v", err)
 			}
-			logPacket(b[:n], inbound, false)
+			logPacket(p, inbound, false)
 		}
 	}()
 
