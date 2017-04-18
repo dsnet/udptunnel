@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/binary"
 	"sync/atomic"
-	"time"
 )
 
 const (
@@ -91,44 +90,28 @@ func (sf *portFilter) Filter(b []byte, d direction) (drop bool) {
 		if sf.ports[src] && dst > 0 {
 			// Check whether the destination port is somewhere we have received
 			// an inbound packet from.
-			now := atomic.LoadUint64(&now)
 			ts := atomic.LoadUint64(&sf.inMap[dst])
-			return now-ts >= 3600
+			return timeNow()-ts >= 3600
 		}
 		if sf.ports[dst] && src > 0 {
 			// Allowed outbound packet, remember the source port so that inbound
 			// traffic is allowed to hit that destination port.
-			now := atomic.LoadUint64(&now)
-			atomic.StoreUint64(&sf.outMap[src], now)
+			atomic.StoreUint64(&sf.outMap[src], timeNow())
 			return false
 		}
 	case inbound:
 		if sf.ports[src] && dst > 0 {
 			// Check whether the destination port is somewhere we have sent
 			// an outbound packet to.
-			now := atomic.LoadUint64(&now)
 			ts := atomic.LoadUint64(&sf.outMap[dst])
-			return now-ts >= 3600
+			return timeNow()-ts >= 3600
 		}
 		if sf.ports[dst] && src > 0 {
 			// Allowed inbound packet, remember the source port so that outbound
 			// traffic is allowed to hit that destination port.
-			now := atomic.LoadUint64(&now)
-			atomic.StoreUint64(&sf.inMap[src], now)
+			atomic.StoreUint64(&sf.inMap[src], timeNow())
 			return false
 		}
 	}
 	return true
-}
-
-// The current Unix timestamp in seconds. Must be read using atomic operations.
-var now uint64
-
-func init() {
-	now = uint64(time.Now().Unix())
-	go func() {
-		for range time.Tick(time.Second) {
-			atomic.AddUint64(&now, 1)
-		}
-	}()
 }

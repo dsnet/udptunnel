@@ -219,31 +219,14 @@ func main() {
 	// TUN device and UDP socket have been set up. However, there is no good
 	// support for doing so currently: https://golang.org/issue/1435
 
-	// If in client mode, start a goroutine that polls for any changes in the
-	// server address due to DNS updates.
 	var atomicRaddr atomic.Value
 	atomicRaddr.Store((*net.UDPAddr)(nil))
-	if !serverMode {
-		addr, err := net.ResolveUDPAddr("udp", config.NetworkAddress)
-		if err != nil {
-			log.Fatalf("error resolving address: %v", err)
-		}
-		atomicRaddr.Store(addr)
-		go func() {
-			for range time.Tick(30 * time.Second) {
-				addr, err := net.ResolveUDPAddr("udp", config.NetworkAddress)
-				if addr != nil && err == nil {
-					atomicRaddr.Store(addr)
-				}
-			}
-		}()
-	}
-
 	magic := md5.Sum([]byte(config.PacketMagic))
 	pf := newPortFilter(config.AllowedPorts)
 
 	// Handle outbound traffic.
 	go func() {
+		var last uint64 // Last time we attempted DNS loookup
 		b := make([]byte, 1<<16)
 		for {
 			n, err := iface.Read(b[len(magic):])
@@ -257,7 +240,19 @@ func main() {
 			n += copy(b, magic[:])
 			p := b[len(magic):n]
 
+			// Since the remote address could change due to updates to DNS,
+			// periodically check DNS for a new address.
 			raddr := atomicRaddr.Load().(*net.UDPAddr)
+			if !serverMode && (raddr == nil || timeNow()-last > 30) {
+				addr, err := net.ResolveUDPAddr("udp", config.NetworkAddress)
+				if !equalAddr(addr, raddr) && addr != nil && err == nil {
+					raddr = addr
+					atomicRaddr.Store(raddr)
+					log.Printf("switching remote address: %v", raddr)
+				}
+				last = timeNow()
+			}
+
 			if pf.Filter(p, outbound) || raddr == nil {
 				logPacket(p, outbound, true)
 				continue
@@ -293,11 +288,11 @@ func main() {
 				continue
 			}
 
+			// We assume a matching magic prefix is sufficient to validate
+			// that the new IP is really the remote endpoint.
+			// We assume that any adversary capable of performing a replay
+			// attack already has the power to disrupt communication.
 			if serverMode {
-				// We assume a matching magic prefix is sufficient to validate
-				// that the new IP is really the remote endpoint.
-				// We assume that any adversary capable of performing a replay
-				// attack already has the power to disrupt communication.
 				if !equalAddr(atomicRaddr.Load().(*net.UDPAddr), raddr) {
 					atomicRaddr.Store(raddr)
 					log.Printf("switching remote address: %v", raddr)
@@ -328,4 +323,20 @@ func equalAddr(x, y *net.UDPAddr) bool {
 		return x == nil && y == nil
 	}
 	return x.IP.Equal(y.IP) && x.Port == y.Port && x.Zone == y.Zone
+}
+
+// The current timestamp in seconds. Must be read using atomic operations.
+var atomicNow uint64
+
+func init() {
+	atomicNow = uint64(time.Now().Unix())
+	go func() {
+		for range time.Tick(time.Second) {
+			atomic.AddUint64(&atomicNow, 1)
+		}
+	}()
+}
+
+func timeNow() uint64 {
+	return atomic.LoadUint64(&atomicNow)
 }
