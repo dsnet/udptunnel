@@ -78,6 +78,11 @@ type TunnelConfig struct {
 	NetworkAddress string
 
 	// AllowedPorts is a list of allowed UDP and TCP ports.
+	// Since udptunnel sends traffic as unencrypted messages,
+	// only protocols that provide application-layer security (like SSH)
+	// should be used.
+	//
+	// The set of allowed ports must match on both the client and server.
 	AllowedPorts []uint16
 
 	// PacketMagic is used to generate a sequence of bytes that is prepended to
