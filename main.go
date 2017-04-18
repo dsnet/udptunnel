@@ -48,7 +48,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -65,9 +64,10 @@ type TunnelConfig struct {
 	// TunnelDevice is the name of the TUN device (default: tunnel).
 	TunnelDevice string
 
-	// TunnelAddress is the private IP address for the tunnel (e.g., 10.0.0.1).
+	// TunnelAddress is the private IP address for the tunnel.
 	// The client and server should have different IP addresses both in the
 	// 255.255.255.0 subnet mask.
+	// The default value is 10.0.0.1 for the server and 10.0.0.2 for the client.
 	TunnelAddress string
 
 	// NetworkAddress is the public IP address and port for the tunnel.
@@ -124,6 +124,17 @@ func loadConfig(conf string) (config TunnelConfig, closer func() error) {
 	}
 	if config.TunnelDevice == "" {
 		config.TunnelDevice = "tunnel"
+	}
+	host, _, err := net.SplitHostPort(config.NetworkAddress)
+	if err != nil {
+		log.Fatalf("invalid network address: %v", err)
+	}
+	if config.TunnelAddress == "" {
+		if host == "0.0.0.0" {
+			config.TunnelAddress = "10.0.0.1"
+		} else {
+			config.TunnelAddress = "10.0.0.2"
+		}
 	}
 	if len(config.AllowedPorts) == 0 {
 		log.Fatalf("no allowed ports specified")
@@ -190,28 +201,15 @@ func main() {
 	}
 
 	// Create a new UDP socket.
-	var cn *net.UDPConn
-	serverMode := strings.HasPrefix(config.NetworkAddress, "0.0.0.0:")
-	if serverMode {
-		laddr, err := net.ResolveUDPAddr("udp", config.NetworkAddress)
-		if err != nil {
-			log.Fatalf("error resolving address: %v", err)
-		}
-		cn, err = net.ListenUDP("udp", laddr)
-		if err != nil {
-			log.Fatalf("error listening on socket: %v", err)
-		}
-		log.Println("daemon started in server mode")
-	} else {
-		laddr, err := net.ResolveUDPAddr("udp", "0.0.0.0:0")
-		if err != nil {
-			log.Fatalf("error resolving address: %v", err)
-		}
-		cn, err = net.ListenUDP("udp", laddr)
-		if err != nil {
-			log.Fatalf("error listening on socket: %v", err)
-		}
-		log.Println("daemon started in client mode")
+	host, port, _ := net.SplitHostPort(config.NetworkAddress)
+	serverMode := host == "0.0.0.0"
+	laddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort("0.0.0.0", port))
+	if err != nil {
+		log.Fatalf("error resolving address: %v", err)
+	}
+	cn, err := net.ListenUDP("udp", laddr)
+	if err != nil {
+		log.Fatalf("error listening on socket: %v", err)
 	}
 	defer cn.Close()
 
@@ -223,6 +221,11 @@ func main() {
 	atomicRaddr.Store((*net.UDPAddr)(nil))
 	magic := md5.Sum([]byte(config.PacketMagic))
 	pf := newPortFilter(config.AllowedPorts)
+	if serverMode {
+		log.Println("daemon started in server mode")
+	} else {
+		log.Println("daemon started in client mode")
+	}
 
 	// Handle outbound traffic.
 	go func() {
