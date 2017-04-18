@@ -1,0 +1,97 @@
+#!/bin/sh
+
+### BEGIN INIT INFO
+# Provides:          udptunnel
+# Required-Start:    $all
+# Required-Stop:     $all
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Starts a UDP private network tunnel
+# Description:       Starts udptunnel using start-stop-daemon
+### END INIT INFO
+
+NAME=udptunnel
+DESC=udptunnel
+PID_FILE=/var/run/$NAME.pid
+DAEMON_PATH=/usr/local/udptunnel
+DAEMON_BINARY=udptunnel
+DAEMON_CONFIG=config.json
+
+# Pre-check.
+if [ ! -f $DAEMON_PATH/$DAEMON_BINARY ]; then
+	echo "$DAEMON_PATH/$DAEMON_BINARY does not exist!"
+	exit 1
+fi
+set -e
+. /lib/lsb/init-functions
+
+running() {
+	[ ! -f "$PID_FILE" ] && return 1
+	[ ! -d /proc/$(cat $PID_FILE) ] &&  return 1
+	return 0
+}
+
+start_server() {
+	echo "Starting $DESC:"
+	start-stop-daemon --start --quiet --pidfile $PID_FILE --make-pidfile --background --chdir $DAEMON_PATH --startas $DAEMON_BINARY -- $DAEMON_CONFIG && RET_CODE=0 || RET_CODE=$?
+	if [ $RET_CODE -eq 0 ]; then
+		sleep 0.5
+		if running; then
+			log_success_msg "$NAME started"
+		else
+			log_failure_msg "$NAME not started"
+			rm -f $PID_FILE
+			return 1
+		fi
+	elif [ $RET_CODE -eq 1 ]; then
+		log_warning_msg "$NAME already started"
+	else
+		log_failure_msg "$NAME not started"
+	fi
+	return $RET_CODE
+}
+
+stop_server() {
+	echo "Stopping $DESC:"
+	start-stop-daemon --stop --quiet --pidfile $PID_FILE && RET_CODE=0 || RET_CODE=$?
+	if [ $RET_CODE -eq 0 ]; then
+		log_success_msg "$NAME stopped"
+	elif [ $RET_CODE -eq 1 ]; then
+		log_warning_msg "$NAME already stopped"
+	else
+		log_failure_msg "$NAME not stopped"
+	fi
+	running || rm -f $PID_FILE
+	return $RET_CODE
+}
+
+status_server() {
+	echo "Checking $DESC status:"
+	if running; then
+		log_success_msg "$NAME is running"
+	else
+		log_warning_msg "$NAME is not running"
+	fi
+	return 0
+}
+
+case "$1" in
+	start)
+		start_server
+		;;
+	stop)
+		stop_server
+		;;
+	restart)
+		stop_server || true
+		sleep 2
+		start_server
+		;;
+	status)
+		status_server
+		;;
+	*)
+		echo "Usage: $NAME {start|stop|restart|status}" >&2
+		exit 1
+		;;
+esac
