@@ -28,13 +28,13 @@ Create a server configuration file:
 ```javascript
 {
 	"TunnelAddress": "10.0.0.1",
-	"NetworkAddress": "0.0.0.0:8000",
+	"NetworkAddress": ":8000",
 	"AllowedPorts": [22],
 }
 ```
 
-The `NetworkAddress` with a host of `0.0.0.0` indicates that the daemon is
-operating in server mode.
+The `NetworkAddress` with an empty host indicates that the daemon is operating
+in server mode.
 
 Create a client configuration file:
 

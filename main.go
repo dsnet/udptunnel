@@ -13,14 +13,14 @@
 // The udptunnel is setup by running it on two different hosts, one in a server
 // configuration, and the other in client configuration. The difference between
 // a server or client is determined by the NetworkAddress field in the
-// configuration. If the address starts with 0.0.0.0, then the daemon operates
-// in server mode. Otherwise, the daemon operates in client mode and will use
-// the address to dial the server.
+// configuration. If the address has an empty host portion, then the daemon
+// operates in server mode. Otherwise, the daemon operates in client mode and
+// will use the host to dial the server.
 //
 // Example server config:
-//	{"TunnelAddress": "10.0.0.1", "NetworkAddress": "0.0.0.0:8000", "AllowedPorts": [22]}
+//	{"TunnelAddress": "10.0.0.1", "NetworkAddress": ":8000", "AllowedPorts": [22]}
 // Example client config:
-//	{"TunnelAddress": "10.0.0.2", "NetworkAddress": "foo.com:8000", "AllowedPorts": [22]}
+//	{"TunnelAddress": "10.0.0.2", "NetworkAddress": "example.com:8000", "AllowedPorts": [22]}
 //
 // See the TunnelConfig struct for more details.
 //
@@ -61,7 +61,7 @@ type TunnelConfig struct {
 	// If the path is empty, then the server will output to os.Stderr.
 	LogFile string
 
-	// TunnelDevice is the name of the TUN device (default: tunnel).
+	// TunnelDevice is the name of the TUN device (default: "tunnel").
 	TunnelDevice string
 
 	// TunnelAddress is the private IP address for the tunnel.
@@ -70,11 +70,11 @@ type TunnelConfig struct {
 	// The default value is 10.0.0.1 for the server and 10.0.0.2 for the client.
 	TunnelAddress string
 
-	// NetworkAddress is the public IP address and port for the tunnel.
-	// If the address starts with 0.0.0.0, then the daemon is operating in
-	// server mode and will bind on the specified port (e.g., 0.0.0.0:8000).
+	// NetworkAddress is the public host and port for UDP traffic.
+	// If the host portion is empty, then the daemon is operting operating in
+	// server mode and will bind on the specified port (e.g., ":8000").
 	// Otherwise, the daemon is operating in client mode and will use the
-	// specified address to communicate with the server (e.g., foo.com:8000).
+	// specified host to communicate with the server (e.g., "example.com:8000").
 	NetworkAddress string
 
 	// AllowedPorts is a list of allowed UDP and TCP ports.
@@ -130,7 +130,7 @@ func loadConfig(conf string) (config TunnelConfig, closer func() error) {
 		log.Fatalf("invalid network address: %v", err)
 	}
 	if config.TunnelAddress == "" {
-		if host == "0.0.0.0" {
+		if host == "" {
 			config.TunnelAddress = "10.0.0.1"
 		} else {
 			config.TunnelAddress = "10.0.0.2"
@@ -202,8 +202,8 @@ func main() {
 
 	// Create a new UDP socket.
 	host, port, _ := net.SplitHostPort(config.NetworkAddress)
-	serverMode := host == "0.0.0.0"
-	laddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort("0.0.0.0", port))
+	serverMode := host == ""
+	laddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort("", port))
 	if err != nil {
 		log.Fatalf("error resolving address: %v", err)
 	}
