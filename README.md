@@ -33,15 +33,21 @@ Create a server configuration file:
 }
 ```
 
+The `NetworkAddress` of `0.0.0.0` indicates that the daemon is operating in
+server mode.
+
 Create a client configuration file:
 
 ```javascript
 {
 	"TunnelAddress": "10.0.0.2",
-	"NetworkAddress": "myserver.example.com:8000",
+	"NetworkAddress": "server.example.com:8000",
 	"AllowedPorts": [22],
 }
 ```
+
+The host `server.example.com` is assumed to resolve to some address where the
+client can reach the server.
 
 Start the daemon on both the client and server (assuming $GOPATH/bin is in your $PATH):
 
@@ -54,7 +60,10 @@ Try accessing the other endpoint:
 ```
 user@client.example.com $ ping -c 1 10.0.0.1
 PING 10.0.0.1 (10.0.0.1) 56(84) bytes of data.
-64 bytes from 10.0.0.1: icmp_req=1 ttl=64 time=51.8 ms
+64 bytes from 10.0.0.1: icmp_req=1 ttl=64 time=56.7 ms
+64 bytes from 10.0.0.1: icmp_req=2 ttl=64 time=58.7 ms
+64 bytes from 10.0.0.1: icmp_req=3 ttl=64 time=50.1 ms
+64 bytes from 10.0.0.1: icmp_req=4 ttl=64 time=51.6 ms
 
 
 user@client.example.com $ nmap 10.0.0.1
@@ -68,5 +77,5 @@ Password: ...
 ```
 
 The above example shows the client trying to communicate with the server,
-which is addressable at 10.0.0.1. The example commands can be done from the
-server by dialing the client at 10.0.0.2, instead.
+which is addressable at `10.0.0.1`. The example commands can be done from the
+server by dialing the client at `10.0.0.2`, instead.
