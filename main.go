@@ -39,6 +39,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -55,6 +56,9 @@ import (
 	"github.com/dsnet/golib/jsonutil"
 	"github.com/songgao/water"
 )
+
+// Version of the udptunnel binary. May be set by linker when building.
+var version string
 
 type TunnelConfig struct {
 	// LogFile is where the tunnel daemon will direct its output log.
@@ -113,6 +117,11 @@ func loadConfig(conf string) (config TunnelConfig, closer func() error) {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 	log.SetOutput(io.MultiWriter(os.Stderr, &logBuf))
 
+	var hash string
+	if b, _ := ioutil.ReadFile(os.Args[0]); len(b) > 0 {
+		hash = fmt.Sprintf("%x", sha256.Sum256(b))
+	}
+
 	// Load configuration file.
 	c, err := ioutil.ReadFile(conf)
 	if err != nil {
@@ -140,7 +149,11 @@ func loadConfig(conf string) (config TunnelConfig, closer func() error) {
 	enc := json.NewEncoder(&b)
 	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "\t")
-	enc.Encode(&config)
+	enc.Encode(struct {
+		TunnelConfig
+		BinaryVersion string `json:",omitempty"`
+		BinarySHA256  string `json:",omitempty"`
+	}{config, version, hash})
 	log.Printf("loaded config:\n%s", b.String())
 
 	// Setup the log output.
