@@ -64,10 +64,10 @@ type TunnelConfig struct {
 	// TunnelDevice is the name of the TUN device (default: "tunnel").
 	TunnelDevice string
 
-	// TunnelAddress is the private IP address for the tunnel.
+	// TunnelAddress is the private IPv4 address for the tunnel.
 	// The client and server should have different IP addresses both in the
 	// 255.255.255.0 subnet mask.
-	// The default value is 10.0.0.1 for the server and 10.0.0.2 for the client.
+	// Recommended value is 10.0.0.1 for the server and 10.0.0.2 for the client.
 	TunnelAddress string
 
 	// NetworkAddress is the public host and port for UDP traffic.
@@ -125,16 +125,11 @@ func loadConfig(conf string) (config TunnelConfig, closer func() error) {
 	if config.TunnelDevice == "" {
 		config.TunnelDevice = "tunnel"
 	}
-	host, _, err := net.SplitHostPort(config.NetworkAddress)
-	if err != nil {
+	if _, _, err := net.SplitHostPort(config.NetworkAddress); err != nil {
 		log.Fatalf("invalid network address: %v", err)
 	}
-	if config.TunnelAddress == "" {
-		if host == "" {
-			config.TunnelAddress = "10.0.0.1"
-		} else {
-			config.TunnelAddress = "10.0.0.2"
-		}
+	if net.ParseIP(config.TunnelAddress).To4() == nil {
+		log.Fatalf("private tunnel address must be valid IPv4 address")
 	}
 	if len(config.AllowedPorts) == 0 {
 		log.Fatalf("no allowed ports specified")
