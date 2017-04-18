@@ -3,7 +3,7 @@
 ## Introduction ##
 
 This repository contains a simple implementation of a point-to-point virtual
-private network by opening a TUN device and sending raw traffic over UDP.
+private network by opening a TUN device and transferring raw traffic over UDP.
 This VPN was designed to create a tunnel between two hosts:
 1. A client host operating behind an obtrusive NAT which drops TCP connections
 frequently, but happens to pass UDP traffic reliably.
@@ -33,8 +33,8 @@ Create a server configuration file:
 }
 ```
 
-The `NetworkAddress` of `0.0.0.0` indicates that the daemon is operating in
-server mode.
+The `NetworkAddress` with a host of `0.0.0.0` indicates that the daemon is
+operating in server mode.
 
 Create a client configuration file:
 
@@ -49,16 +49,17 @@ Create a client configuration file:
 The host `server.example.com` is assumed to resolve to some address where the
 client can reach the server.
 
-Start the daemon on both the client and server (assuming $GOPATH/bin is in your $PATH):
+Start the daemon on both the client and server (assuming `$GOPATH/bin` is in your `$PATH`):
 
 ```
 root@server.example.com $ udptunnel /path/to/config.json
 root@client.example.com $ udptunnel /path/to/config.json
 ```
 
-Try accessing the other endpoint:
+Try accessing the other endpoint (example is for client to server):
+
 ```
-user@client.example.com $ ping -c 1 10.0.0.1
+user@client.example.com $ ping 10.0.0.1
 PING 10.0.0.1 (10.0.0.1) 56(84) bytes of data.
 64 bytes from 10.0.0.1: icmp_req=1 ttl=64 time=56.7 ms
 64 bytes from 10.0.0.1: icmp_req=2 ttl=64 time=58.7 ms
