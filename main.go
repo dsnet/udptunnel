@@ -322,5 +322,5 @@ func equalAddr(x, y *net.UDPAddr) bool {
 	if x == nil || y == nil {
 		return x == nil && y == nil
 	}
-	return bytes.Equal(x.IP, y.IP) && x.Port == y.Port && x.Zone == y.Zone
+	return x.IP.Equal(y.IP) && x.Port == y.Port && x.Zone == y.Zone
 }
