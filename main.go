@@ -134,15 +134,6 @@ func loadConfig(conf string) (config TunnelConfig, closer func() error) {
 	if config.TunnelDevice == "" {
 		config.TunnelDevice = "tunnel"
 	}
-	if _, _, err := net.SplitHostPort(config.NetworkAddress); err != nil {
-		log.Fatalf("invalid network address: %v", err)
-	}
-	if net.ParseIP(config.TunnelAddress).To4() == nil {
-		log.Fatalf("private tunnel address must be valid IPv4 address")
-	}
-	if len(config.AllowedPorts) == 0 {
-		log.Fatalf("no allowed ports specified")
-	}
 
 	// Print the configuration.
 	var b bytes.Buffer
@@ -171,6 +162,15 @@ func loadConfig(conf string) (config TunnelConfig, closer func() error) {
 		closer = f.Close
 	}
 
+	if _, _, err := net.SplitHostPort(config.NetworkAddress); err != nil {
+		log.Fatalf("invalid network address: %v", err)
+	}
+	if net.ParseIP(config.TunnelAddress).To4() == nil {
+		log.Fatalf("private tunnel address must be valid IPv4 address")
+	}
+	if len(config.AllowedPorts) == 0 {
+		log.Fatalf("no allowed ports specified")
+	}
 	return config, closer
 }
 
