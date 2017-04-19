@@ -3,7 +3,24 @@ package main
 import (
 	"encoding/binary"
 	"sync/atomic"
+	"time"
 )
+
+// The current timestamp in seconds. Must be read using atomic operations.
+var atomicNow uint64
+
+func init() {
+	atomicNow = uint64(time.Now().Unix())
+	go func() {
+		for range time.Tick(time.Second) {
+			atomic.AddUint64(&atomicNow, 1)
+		}
+	}()
+}
+
+var timeNow = func() uint64 {
+	return atomic.LoadUint64(&atomicNow)
+}
 
 const (
 	icmp = 1
