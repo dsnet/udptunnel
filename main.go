@@ -359,6 +359,8 @@ func pingIface(wg *sync.WaitGroup, addr string) {
 	// with some EOF error. As a workaround, we broadcast on the IP range
 	// of the TUN device, forcing the Read to unblock with at least one packet.
 	// The subsequent call to Read will properly report that it is closed.
+	//
+	// See https://github.com/songgao/water/issues/22
 	addr = strings.TrimRight(addr, "0123456798") + "255"
 	cmd := exec.Command("/bin/ping", "-c", "1", "-b", addr)
 	cmd.Start()
