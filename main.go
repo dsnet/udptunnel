@@ -356,6 +356,6 @@ func init() {
 	}()
 }
 
-func timeNow() uint64 {
+var timeNow = func() uint64 {
 	return atomic.LoadUint64(&atomicNow)
 }
