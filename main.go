@@ -336,10 +336,3 @@ func updateAddr(atom *atomic.Value, addr *net.UDPAddr) {
 		log.Printf("switching remote address: %v", addr)
 	}
 }
-
-func equalAddr(x, y *net.UDPAddr) bool {
-	if x == nil || y == nil {
-		return x == nil && y == nil
-	}
-	return x.IP.Equal(y.IP) && x.Port == y.Port && x.Zone == y.Zone
-}
