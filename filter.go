@@ -6,6 +6,9 @@ import (
 	"time"
 )
 
+// The length of time before entries in the filter map are considered stale.
+const expireTimeout = 300
+
 // The current timestamp in seconds. Must be read using atomic operations.
 var atomicNow uint64
 
@@ -108,7 +111,7 @@ func (sf *portFilter) Filter(b []byte, d direction) (drop bool) {
 			// Check whether the destination port is somewhere we have received
 			// an inbound packet from.
 			ts := atomic.LoadUint64(&sf.inMap[dst])
-			return timeNow()-ts >= 3600
+			return timeNow()-ts >= expireTimeout
 		}
 		if sf.ports[dst] && src > 0 {
 			// Allowed outbound packet, remember the source port so that inbound
@@ -121,7 +124,7 @@ func (sf *portFilter) Filter(b []byte, d direction) (drop bool) {
 			// Check whether the destination port is somewhere we have sent
 			// an outbound packet to.
 			ts := atomic.LoadUint64(&sf.outMap[dst])
-			return timeNow()-ts >= 3600
+			return timeNow()-ts >= expireTimeout
 		}
 		if sf.ports[dst] && src > 0 {
 			// Allowed inbound packet, remember the source port so that outbound
