@@ -50,6 +50,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -219,6 +220,7 @@ func run(ctx context.Context, config TunnelConfig, logger logger) {
 	if err != nil {
 		logger.Fatalf("error creating tun device: %v", err)
 	}
+	defer pingIface(&wg, config.TunnelAddress)
 	defer iface.Close()
 	if err := exec.Command("/sbin/ip", "link", "set", "dev", config.TunnelDevice, "mtu", "1300").Run(); err != nil {
 		logger.Fatalf("ip link error: %v", err)
@@ -283,8 +285,7 @@ func run(ctx context.Context, config TunnelConfig, logger logger) {
 				if isDone(ctx) {
 					return
 				}
-				logger.Printf("tun read error: %v", err)
-				continue
+				logger.Fatalf("tun read error: %v", err)
 			}
 			n += copy(b, magic[:])
 			p := b[len(magic):n]
@@ -296,7 +297,10 @@ func run(ctx context.Context, config TunnelConfig, logger logger) {
 			}
 
 			if _, err := cn.WriteToUDP(b[:n], raddr); err != nil {
-				logger.Printf("net write error: %v", err)
+				if isDone(ctx) {
+					return
+				}
+				logger.Fatalf("net write error: %v", err)
 			}
 			pl.Log(p, outbound, false)
 		}
@@ -313,8 +317,7 @@ func run(ctx context.Context, config TunnelConfig, logger logger) {
 				if isDone(ctx) {
 					return
 				}
-				logger.Printf("net read error: %v", err)
-				continue
+				logger.Fatalf("net read error: %v", err)
 			}
 			if !bytes.HasPrefix(b, magic[:]) {
 				logger.Printf("invalid packet from remote address: %v", raddr)
@@ -336,13 +339,31 @@ func run(ctx context.Context, config TunnelConfig, logger logger) {
 			}
 
 			if _, err := iface.Write(p); err != nil {
-				logger.Printf("tun write error: %v", err)
+				if isDone(ctx) {
+					return
+				}
+				logger.Fatalf("tun write error: %v", err)
 			}
 			pl.Log(p, inbound, false)
 		}
 	}()
 
 	<-ctx.Done()
+}
+
+// pingIface sends a broadcast ping to the IP range of the TUN device
+// until the TUN device has shutdown.
+func pingIface(wg *sync.WaitGroup, addr string) {
+	// HACK(dsnet): For reasons I do not understand, closing the TUN device
+	// does not cause a pending Read operation to become unblocked and return
+	// with some EOF error. As a workaround, we broadcast on the IP range
+	// of the TUN device, forcing the Read to unblock with at least one packet.
+	// The subsequent call to Read will properly report that it is closed.
+	addr = strings.TrimRight(addr, "0123456798") + "255"
+	cmd := exec.Command("/bin/ping", "-c", "1", "-b", addr)
+	cmd.Start()
+	wg.Wait()
+	cmd.Process.Kill()
 }
 
 func isDone(ctx context.Context) bool {
