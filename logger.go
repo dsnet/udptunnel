@@ -131,25 +131,29 @@ func (pl *packetLogger) print() {
 		if k.dropped {
 			drop = "dropped "
 		}
-		ipv4tos := func(ip [4]byte) string {
-			return fmt.Sprintf("%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3])
-		}
-		link := fmt.Sprintf("%s:%d -> %s:%d", ipv4tos(k.srcAddr), k.srcPort, ipv4tos(k.dstAddr), k.dstPort)
+		link := fmt.Sprintf("%s:%d -> %s:%d", formatIPv4(k.srcAddr), k.srcPort, formatIPv4(k.dstAddr), k.dstPort)
 		if k.ipProtocol != tcp && k.ipProtocol != udp {
-			link = fmt.Sprintf("%s -> %s", ipv4tos(k.srcAddr), ipv4tos(k.dstAddr))
+			link = fmt.Sprintf("%s -> %s", formatIPv4(k.srcAddr), formatIPv4(k.dstAddr))
 		}
-		sizes := strconv.FormatPrefix(float64(v.sizes), strconv.IEC, 2)
-		sizes = strings.TrimSuffix(strings.TrimRight(sizes, "0"), ".")
 		stats = append(stats, fmt.Sprintf("\tIPv%d/%s %s - %cx %d %spackets (%sB)",
-			k.ipVersion, proto, link, k.direction, v.count, drop, sizes))
+			k.ipVersion, proto, link, k.direction, v.count, drop, formatIEC(v.sizes)))
 	}
-	stats[0] = fmt.Sprintf("\tRx %d total packets (%dB), dropped %d total packets (%dB)",
-		pl.rx.okay.count, pl.rx.okay.sizes, pl.rx.drop.count, pl.rx.drop.sizes)
-	stats[1] = fmt.Sprintf("\tTx %d total packets (%dB), dropped %d total packets (%dB)",
-		pl.tx.okay.count, pl.tx.okay.sizes, pl.tx.drop.count, pl.tx.drop.sizes)
+	stats[0] = fmt.Sprintf("\tRx %d total packets (%sB), dropped %d total packets (%sB)",
+		pl.rx.okay.count, formatIEC(pl.rx.okay.sizes), pl.rx.drop.count, formatIEC(pl.rx.drop.sizes))
+	stats[1] = fmt.Sprintf("\tTx %d total packets (%sB), dropped %d total packets (%sB)",
+		pl.tx.okay.count, formatIEC(pl.tx.okay.sizes), pl.tx.drop.count, formatIEC(pl.tx.drop.sizes))
 	sort.Strings(stats[2:])
 	period := time.Now().Round(time.Second).Sub(pl.last)
 	pl.logger.Printf("Packet statistics (%v):\n%s", period, strings.Join(stats, "\n"))
 	pl.m = map[packetLog]packetCount{}
 	pl.last = time.Now().Round(time.Second)
+}
+
+func formatIEC(n uint64) string {
+	s := strconv.FormatPrefix(float64(n), strconv.IEC, 2)
+	return strings.TrimSuffix(strings.TrimRight(s, "0"), ".")
+}
+
+func formatIPv4(ip [4]byte) string {
+	return fmt.Sprintf("%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3])
 }
