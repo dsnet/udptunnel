@@ -105,6 +105,9 @@ func (sf *portFilter) Filter(b []byte, d direction) (drop bool) {
 		return ip.Protocol() != icmp // Always allow ping
 	}
 	src, dst := transportPacket(ip.Body()).Ports()
+	if sf.ports[src] && sf.ports[dst] {
+		return false
+	}
 	switch d {
 	case outbound:
 		if sf.ports[src] && dst > 0 {

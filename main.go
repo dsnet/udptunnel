@@ -196,7 +196,7 @@ func main() {
 		cancel()
 	}()
 
-	run(ctx, config, logger)
+	run(ctx, config, logger, nil, nil)
 }
 
 type logger interface {
@@ -204,7 +204,12 @@ type logger interface {
 	Printf(string, ...interface{})
 }
 
-func run(ctx context.Context, config TunnelConfig, logger logger) {
+// run starts the VPN tunnel over UDP using the provided config and logger.
+// When the context is canceled, the function is guaranteed to block until
+// it is fully shutdown.
+//
+// The channels testReady and testDrop are only used for testing and may be nil.
+func run(ctx context.Context, config TunnelConfig, logger logger, testReady chan<- struct{}, testDrop chan<- []byte) {
 	// Determine the daemon mode from the network address.
 	var wg sync.WaitGroup
 	host, port, _ := net.SplitHostPort(config.NetworkAddress)
@@ -272,6 +277,9 @@ func run(ctx context.Context, config TunnelConfig, logger logger) {
 		}()
 	}
 
+	if testReady != nil {
+		close(testReady)
+	}
 	magic := md5.Sum([]byte(config.PacketMagic))
 	pf := newPortFilter(config.AllowedPorts)
 	pl := newPacketLogger(ctx, &wg, logger)
@@ -294,6 +302,9 @@ func run(ctx context.Context, config TunnelConfig, logger logger) {
 
 			raddr := atomicRaddr.Load().(*net.UDPAddr)
 			if pf.Filter(p, outbound) || raddr == nil {
+				if testDrop != nil {
+					testDrop <- append([]byte(nil), p...)
+				}
 				pl.Log(p, outbound, true)
 				continue
 			}
@@ -322,12 +333,18 @@ func run(ctx context.Context, config TunnelConfig, logger logger) {
 				logger.Fatalf("net read error: %v", err)
 			}
 			if !bytes.HasPrefix(b[:n], magic[:]) {
+				if testDrop != nil {
+					testDrop <- append([]byte(nil), b[:n]...)
+				}
 				logger.Printf("invalid packet from remote address: %v", raddr)
 				continue
 			}
 			p := b[len(magic):n]
 
 			if pf.Filter(p, inbound) {
+				if testDrop != nil {
+					testDrop <- append([]byte(nil), p...)
+				}
 				pl.Log(p, inbound, true)
 				continue
 			}
