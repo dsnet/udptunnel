@@ -8,6 +8,8 @@
 //	TCP connections, but happens to pass UDP traffic reliably.
 //	* A server host that is internet-accessible.
 //
+// This only supports Linux.
+//
 // Example Setup
 //
 // The udptunnel is setup by running it on two different hosts, one in a server

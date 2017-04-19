@@ -17,6 +17,8 @@ other locally binded sockets on the endpoints, a simple port filter is built-in
 to restrict IP traffic to only the specified ports. Users of udptunnel should
 also setup iptable rules as a secondary measure to restrict malicious traffic.
 
+This only supports Linux.
+
 ## Usage ##
 
 Build the daemon:
