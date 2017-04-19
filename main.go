@@ -49,6 +49,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -112,10 +114,9 @@ const (
 	inbound  direction = 'R' // Receive
 )
 
-func loadConfig(conf string) (config TunnelConfig, closer func() error) {
+func loadConfig(conf string) (config TunnelConfig, logger *log.Logger, closer func() error) {
 	var logBuf bytes.Buffer
-	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
-	log.SetOutput(io.MultiWriter(os.Stderr, &logBuf))
+	logger = log.New(io.MultiWriter(os.Stderr, &logBuf), "", log.Ldate|log.Ltime|log.Lshortfile)
 
 	var hash string
 	if b, _ := ioutil.ReadFile(os.Args[0]); len(b) > 0 {
@@ -125,11 +126,11 @@ func loadConfig(conf string) (config TunnelConfig, closer func() error) {
 	// Load configuration file.
 	c, err := ioutil.ReadFile(conf)
 	if err != nil {
-		log.Fatalf("unable to read config: %v", err)
+		logger.Fatalf("unable to read config: %v", err)
 	}
 	c, _ = jsonutil.Minify(c)
 	if err := json.Unmarshal(c, &config); err != nil {
-		log.Fatalf("unable to decode config: %v", err)
+		logger.Fatalf("unable to decode config: %v", err)
 	}
 	if config.TunnelDevice == "" {
 		config.TunnelDevice = "tunnel"
@@ -145,33 +146,33 @@ func loadConfig(conf string) (config TunnelConfig, closer func() error) {
 		BinaryVersion string `json:",omitempty"`
 		BinarySHA256  string `json:",omitempty"`
 	}{config, version, hash})
-	log.Printf("loaded config:\n%s", b.String())
+	logger.Printf("loaded config:\n%s", b.String())
 
 	// Setup the log output.
 	if config.LogFile == "" {
-		log.SetOutput(os.Stderr)
+		logger.SetOutput(os.Stderr)
 		closer = func() error { return nil }
 	} else {
 		f, err := os.OpenFile(config.LogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0664)
 		if err != nil {
-			log.Fatalf("error opening log file: %v", err)
+			logger.Fatalf("error opening log file: %v", err)
 		}
 		f.Write(logBuf.Bytes()) // Write log output prior to this point
-		log.Printf("suppress stderr logging (redirected to %s)", f.Name())
-		log.SetOutput(f)
+		logger.Printf("suppress stderr logging (redirected to %s)", f.Name())
+		logger.SetOutput(f)
 		closer = f.Close
 	}
 
 	if _, _, err := net.SplitHostPort(config.NetworkAddress); err != nil {
-		log.Fatalf("invalid network address: %v", err)
+		logger.Fatalf("invalid network address: %v", err)
 	}
 	if net.ParseIP(config.TunnelAddress).To4() == nil {
-		log.Fatalf("private tunnel address must be valid IPv4 address")
+		logger.Fatalf("private tunnel address must be valid IPv4 address")
 	}
 	if len(config.AllowedPorts) == 0 {
-		log.Fatalf("no allowed ports specified")
+		logger.Fatalf("no allowed ports specified")
 	}
-	return config, closer
+	return config, logger, closer
 }
 
 func main() {
@@ -180,7 +181,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\t%s CONFIG_PATH\n", os.Args[0])
 		os.Exit(1)
 	}
-	config, closer := loadConfig(os.Args[1])
+	config, logger, closer := loadConfig(os.Args[1])
 	defer closer()
 
 	// Setup signal handler to initiate shutdown.
@@ -188,36 +189,55 @@ func main() {
 	go func() {
 		sigc := make(chan os.Signal, 1)
 		signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
-		log.Printf("received %v - initiating shutdown", <-sigc)
+		logger.Printf("received %v - initiating shutdown", <-sigc)
 		cancel()
 	}()
+
+	run(ctx, config, logger)
+}
+
+type logger interface {
+	Fatalf(string, ...interface{})
+	Printf(string, ...interface{})
+}
+
+func run(ctx context.Context, config TunnelConfig, logger logger) {
+	// Determine the daemon mode from the network address.
+	var wg sync.WaitGroup
+	host, port, _ := net.SplitHostPort(config.NetworkAddress)
+	serverMode := host == ""
+	if serverMode {
+		logger.Printf("%s starting in server mode", path.Base(os.Args[0]))
+	} else {
+		logger.Printf("%s starting in client mode", path.Base(os.Args[0]))
+	}
+	defer logger.Printf("%s shutdown", path.Base(os.Args[0]))
+	defer wg.Wait()
 
 	// Create a new tunnel device (requires root privileges).
 	iface, err := water.NewTUN(config.TunnelDevice)
 	if err != nil {
-		log.Fatalf("error creating tun device: %v", err)
+		logger.Fatalf("error creating tun device: %v", err)
 	}
 	defer iface.Close()
 	if err := exec.Command("/sbin/ip", "link", "set", "dev", config.TunnelDevice, "mtu", "1300").Run(); err != nil {
-		log.Fatalf("ip link error: %v", err)
+		logger.Fatalf("ip link error: %v", err)
 	}
 	if err := exec.Command("/sbin/ip", "addr", "add", config.TunnelAddress+"/24", "dev", config.TunnelDevice).Run(); err != nil {
-		log.Fatalf("ip addr error: %v", err)
+		logger.Fatalf("ip addr error: %v", err)
 	}
 	if err := exec.Command("/sbin/ip", "link", "set", "dev", config.TunnelDevice, "up").Run(); err != nil {
-		log.Fatalf("ip link error: %v", err)
+		logger.Fatalf("ip link error: %v", err)
 	}
 
 	// Create a new UDP socket.
-	host, port, _ := net.SplitHostPort(config.NetworkAddress)
-	serverMode := host == ""
 	laddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort("", port))
 	if err != nil {
-		log.Fatalf("error resolving address: %v", err)
+		logger.Fatalf("error resolving address: %v", err)
 	}
 	cn, err := net.ListenUDP("udp", laddr)
 	if err != nil {
-		log.Fatalf("error listening on socket: %v", err)
+		logger.Fatalf("error listening on socket: %v", err)
 	}
 	defer cn.Close()
 
@@ -232,27 +252,30 @@ func main() {
 	if !serverMode {
 		raddr, err := net.ResolveUDPAddr("udp", config.NetworkAddress)
 		if err != nil {
-			log.Fatalf("error resolving address: %v", err)
+			logger.Fatalf("error resolving address: %v", err)
 		}
-		updateAddr(&atomicRaddr, raddr)
+		updateAddr(&atomicRaddr, raddr, logger)
 		go func() {
-			for range time.Tick(time.Minute) {
+			t := time.NewTicker(time.Minute)
+			defer t.Stop()
+			for range t.C {
 				raddr, _ := net.ResolveUDPAddr("udp", config.NetworkAddress)
-				updateAddr(&atomicRaddr, raddr)
+				if isDone(ctx) {
+					return
+				}
+				updateAddr(&atomicRaddr, raddr, logger)
 			}
 		}()
 	}
 
 	magic := md5.Sum([]byte(config.PacketMagic))
 	pf := newPortFilter(config.AllowedPorts)
-	if serverMode {
-		log.Println("daemon started in server mode")
-	} else {
-		log.Println("daemon started in client mode")
-	}
+	pl := newPacketLogger(ctx, &wg, logger)
 
 	// Handle outbound traffic.
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		b := make([]byte, 1<<16)
 		for {
 			n, err := iface.Read(b[len(magic):])
@@ -260,7 +283,7 @@ func main() {
 				if isDone(ctx) {
 					return
 				}
-				log.Printf("tun read error: %v", err)
+				logger.Printf("tun read error: %v", err)
 				continue
 			}
 			n += copy(b, magic[:])
@@ -268,19 +291,21 @@ func main() {
 
 			raddr := atomicRaddr.Load().(*net.UDPAddr)
 			if pf.Filter(p, outbound) || raddr == nil {
-				logPacket(p, outbound, true)
+				pl.Log(p, outbound, true)
 				continue
 			}
 
 			if _, err := cn.WriteToUDP(b[:n], raddr); err != nil {
-				log.Printf("net write error: %v", err)
+				logger.Printf("net write error: %v", err)
 			}
-			logPacket(p, outbound, false)
+			pl.Log(p, outbound, false)
 		}
 	}()
 
 	// Handle inbound traffic.
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		b := make([]byte, 1<<16)
 		for {
 			n, raddr, err := cn.ReadFromUDP(b)
@@ -288,17 +313,17 @@ func main() {
 				if isDone(ctx) {
 					return
 				}
-				log.Printf("net read error: %v", err)
+				logger.Printf("net read error: %v", err)
 				continue
 			}
 			if !bytes.HasPrefix(b, magic[:]) {
-				log.Printf("invalid packet from remote address: %v", raddr)
+				logger.Printf("invalid packet from remote address: %v", raddr)
 				continue
 			}
 			p := b[len(magic):n]
 
 			if pf.Filter(p, inbound) {
-				logPacket(p, inbound, true)
+				pl.Log(p, inbound, true)
 				continue
 			}
 
@@ -307,13 +332,13 @@ func main() {
 			// We assume that any adversary capable of performing a replay
 			// attack already has the power to disrupt communication.
 			if serverMode {
-				updateAddr(&atomicRaddr, raddr)
+				updateAddr(&atomicRaddr, raddr, logger)
 			}
 
 			if _, err := iface.Write(p); err != nil {
-				log.Printf("tun write error: %v", err)
+				logger.Printf("tun write error: %v", err)
 			}
-			logPacket(p, inbound, false)
+			pl.Log(p, inbound, false)
 		}
 	}()
 
@@ -329,10 +354,10 @@ func isDone(ctx context.Context) bool {
 	}
 }
 
-func updateAddr(atom *atomic.Value, addr *net.UDPAddr) {
+func updateAddr(atom *atomic.Value, addr *net.UDPAddr, logger logger) {
 	oldAddr := atom.Load().(*net.UDPAddr)
 	if addr != nil && (oldAddr == nil || !addr.IP.Equal(oldAddr.IP) || addr.Port != oldAddr.Port || addr.Zone != oldAddr.Zone) {
 		atom.Store(addr)
-		log.Printf("switching remote address: %v", addr)
+		logger.Printf("switching remote address: %v", addr)
 	}
 }
