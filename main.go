@@ -225,8 +225,24 @@ func main() {
 	// TUN device and UDP socket have been set up. However, there is no good
 	// support for doing so currently: https://golang.org/issue/1435
 
+	// Since the remote address could change due to updates to DNS,
+	// start goroutine to periodically check DNS for a new address.
 	var atomicRaddr atomic.Value
 	atomicRaddr.Store((*net.UDPAddr)(nil))
+	if !serverMode {
+		raddr, err := net.ResolveUDPAddr("udp", config.NetworkAddress)
+		if err != nil {
+			log.Fatalf("error resolving address: %v", err)
+		}
+		updateAddr(&atomicRaddr, raddr)
+		go func() {
+			for range time.Tick(time.Minute) {
+				raddr, _ := net.ResolveUDPAddr("udp", config.NetworkAddress)
+				updateAddr(&atomicRaddr, raddr)
+			}
+		}()
+	}
+
 	magic := md5.Sum([]byte(config.PacketMagic))
 	pf := newPortFilter(config.AllowedPorts)
 	if serverMode {
@@ -237,7 +253,6 @@ func main() {
 
 	// Handle outbound traffic.
 	go func() {
-		var last uint64 // Last time we attempted DNS loookup
 		b := make([]byte, 1<<16)
 		for {
 			n, err := iface.Read(b[len(magic):])
@@ -251,19 +266,7 @@ func main() {
 			n += copy(b, magic[:])
 			p := b[len(magic):n]
 
-			// Since the remote address could change due to updates to DNS,
-			// periodically check DNS for a new address.
 			raddr := atomicRaddr.Load().(*net.UDPAddr)
-			if !serverMode && (raddr == nil || timeNow()-last > 30) {
-				addr, err := net.ResolveUDPAddr("udp", config.NetworkAddress)
-				if !equalAddr(addr, raddr) && addr != nil && err == nil {
-					raddr = addr
-					atomicRaddr.Store(raddr)
-					log.Printf("switching remote address: %v", raddr)
-				}
-				last = timeNow()
-			}
-
 			if pf.Filter(p, outbound) || raddr == nil {
 				logPacket(p, outbound, true)
 				continue
@@ -304,10 +307,7 @@ func main() {
 			// We assume that any adversary capable of performing a replay
 			// attack already has the power to disrupt communication.
 			if serverMode {
-				if !equalAddr(atomicRaddr.Load().(*net.UDPAddr), raddr) {
-					atomicRaddr.Store(raddr)
-					log.Printf("switching remote address: %v", raddr)
-				}
+				updateAddr(&atomicRaddr, raddr)
 			}
 
 			if _, err := iface.Write(p); err != nil {
@@ -326,6 +326,14 @@ func isDone(ctx context.Context) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func updateAddr(atom *atomic.Value, addr *net.UDPAddr) {
+	oldAddr := atom.Load().(*net.UDPAddr)
+	if addr != nil && (oldAddr == nil || !addr.IP.Equal(oldAddr.IP) || addr.Port != oldAddr.Port || addr.Zone != oldAddr.Zone) {
+		atom.Store(addr)
+		log.Printf("switching remote address: %v", addr)
 	}
 }
 
