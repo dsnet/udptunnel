@@ -239,11 +239,11 @@ func run(ctx context.Context, config TunnelConfig, logger logger) {
 	if err != nil {
 		logger.Fatalf("error resolving address: %v", err)
 	}
-	cn, err := net.ListenUDP("udp", laddr)
+	sock, err := net.ListenUDP("udp", laddr)
 	if err != nil {
 		logger.Fatalf("error listening on socket: %v", err)
 	}
-	defer cn.Close()
+	defer sock.Close()
 
 	// TODO(dsnet): We should drop root privileges at this point since the
 	// TUN device and UDP socket have been set up. However, there is no good
@@ -298,7 +298,7 @@ func run(ctx context.Context, config TunnelConfig, logger logger) {
 				continue
 			}
 
-			if _, err := cn.WriteToUDP(b[:n], raddr); err != nil {
+			if _, err := sock.WriteToUDP(b[:n], raddr); err != nil {
 				if isDone(ctx) {
 					return
 				}
@@ -314,7 +314,7 @@ func run(ctx context.Context, config TunnelConfig, logger logger) {
 		defer wg.Done()
 		b := make([]byte, 1<<16)
 		for {
-			n, raddr, err := cn.ReadFromUDP(b)
+			n, raddr, err := sock.ReadFromUDP(b)
 			if err != nil {
 				if isDone(ctx) {
 					return
