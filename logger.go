@@ -16,6 +16,7 @@ type packetLogger struct {
 	last   time.Time // Last time we printed statistics
 	c      chan packetLog
 	m      map[packetLog]packetCount
+	rx, tx struct{ okay, drop packetCount }
 }
 
 type packetLog struct {
@@ -105,9 +106,23 @@ func (pl *packetLogger) print() {
 	if len(pl.m) == 0 {
 		return
 	}
-	var stats []string
+	stats := make([]string, 2) // First 2 lines for total stats
 	protoNames := map[int]string{icmp: "ICMP", udp: "UDP", tcp: "TCP"}
 	for k, v := range pl.m {
+		var pc *packetCount
+		switch {
+		case !k.dropped && k.direction == outbound:
+			pc = &pl.tx.okay
+		case !k.dropped && k.direction == inbound:
+			pc = &pl.rx.okay
+		case k.dropped && k.direction == outbound:
+			pc = &pl.tx.drop
+		case k.dropped && k.direction == inbound:
+			pc = &pl.rx.drop
+		}
+		pc.count += v.count
+		pc.sizes += v.sizes
+
 		proto := protoNames[k.ipProtocol]
 		if proto == "" {
 			proto = fmt.Sprintf("Unknown%d", k.ipProtocol)
@@ -128,7 +143,11 @@ func (pl *packetLogger) print() {
 		stats = append(stats, fmt.Sprintf("\tIPv%d/%s %s - %cx %d %spackets (%sB)",
 			k.ipVersion, proto, link, k.direction, v.count, drop, sizes))
 	}
-	sort.Strings(stats)
+	stats[0] = fmt.Sprintf("\tRx %d total packets (%dB), dropped %d total packets (%dB)",
+		pl.rx.okay.count, pl.rx.okay.sizes, pl.rx.drop.count, pl.rx.drop.sizes)
+	stats[1] = fmt.Sprintf("\tTx %d total packets (%dB), dropped %d total packets (%dB)",
+		pl.tx.okay.count, pl.tx.okay.sizes, pl.tx.drop.count, pl.tx.drop.sizes)
+	sort.Strings(stats[2:])
 	period := time.Now().Round(time.Second).Sub(pl.last)
 	pl.logger.Printf("Packet statistics (%v):\n%s", period, strings.Join(stats, "\n"))
 	pl.m = map[packetLog]packetCount{}
