@@ -321,7 +321,7 @@ func run(ctx context.Context, config TunnelConfig, logger logger) {
 				}
 				logger.Fatalf("net read error: %v", err)
 			}
-			if !bytes.HasPrefix(b, magic[:]) {
+			if !bytes.HasPrefix(b[:n], magic[:]) {
 				logger.Printf("invalid packet from remote address: %v", raddr)
 				continue
 			}
