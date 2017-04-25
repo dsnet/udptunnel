@@ -68,7 +68,7 @@ var version string
 type TunnelConfig struct {
 	// LogFile is where the tunnel daemon will direct its output log.
 	// If the path is empty, then the server will output to os.Stderr.
-	LogFile string
+	LogFile string `json:",omitempty"`
 
 	// TunnelDevice is the name of the TUN device (default: "tunnel").
 	TunnelDevice string
@@ -76,7 +76,7 @@ type TunnelConfig struct {
 	// TunnelAddress is the private IPv4 address for the tunnel.
 	// The client and server should have different IP addresses both in the
 	// 255.255.255.0 subnet mask.
-	// Recommended value is 10.0.0.1 for the server and 10.0.0.2 for the client.
+	// The default value is 10.0.0.1 for the server and 10.0.0.2 for the client.
 	TunnelAddress string
 
 	// NetworkAddress is the public host and port for UDP traffic.
@@ -107,7 +107,7 @@ type TunnelConfig struct {
 	// communication between the client and server.
 	//
 	// This value must match on both the client and server.
-	PacketMagic string
+	PacketMagic string `json:",omitempty"`
 }
 
 type direction byte
@@ -137,6 +137,13 @@ func loadConfig(conf string) (config TunnelConfig, logger *log.Logger, closer fu
 	}
 	if config.TunnelDevice == "" {
 		config.TunnelDevice = "tunnel"
+	}
+	if config.TunnelAddress == "" {
+		if host, _, _ := net.SplitHostPort(config.NetworkAddress); host == "" {
+			config.TunnelAddress = "10.0.0.1"
+		} else {
+			config.TunnelAddress = "10.0.0.2"
+		}
 	}
 
 	// Print the configuration.
