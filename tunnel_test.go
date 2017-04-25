@@ -60,13 +60,17 @@ func TestTunnel(t *testing.T) {
 	chanReady := make(chan struct{})
 	go func() {
 		defer close(chanDrop)
-		config := TunnelConfig{
-			TunnelDevice:   "test0",
-			TunnelAddress:  "10.0.10.1",
-			NetworkAddress: fmt.Sprintf(":%d", addrLocal.Port),
-			AllowedPorts:   []uint16{uint16(addrSpecified.Port)},
+		tunn := tunnel{
+			server:    true,
+			tunDev:    "test0",
+			tunAddr:   "10.0.10.1",
+			netAddr:   fmt.Sprintf(":%d", addrLocal.Port),
+			ports:     []uint16{uint16(addrSpecified.Port)},
+			log:       testLogger{t},
+			testReady: chanReady,
+			testDrop:  chanDrop,
 		}
-		run(ctx, config, testLogger{t}, chanReady, chanDrop)
+		tunn.run(ctx)
 	}()
 
 	defer func() {
