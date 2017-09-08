@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dsnet/golib/strconv"
+	"github.com/dsnet/golib/unitconv"
 )
 
 type packetLogger struct {
@@ -150,7 +150,7 @@ func (pl *packetLogger) print() {
 }
 
 func formatIEC(n uint64) string {
-	s := strconv.FormatPrefix(float64(n), strconv.IEC, 2)
+	s := unitconv.FormatPrefix(float64(n), unitconv.IEC, 2)
 	return strings.TrimSuffix(strings.TrimRight(s, "0"), ".")
 }
 
