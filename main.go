@@ -52,7 +52,7 @@ import (
 	"path"
 	"syscall"
 
-	"github.com/dsnet/golib/jsonutil"
+	"github.com/dsnet/golib/jsonfmt"
 )
 
 // Version of the udptunnel binary. May be set by linker when building.
@@ -118,7 +118,7 @@ func loadConfig(conf string) (tunn tunnel, logger *log.Logger, closer func() err
 	if err != nil {
 		logger.Fatalf("unable to read config: %v", err)
 	}
-	c, _ = jsonutil.Minify(c)
+	c, _ = jsonfmt.Format(c, jsonfmt.Minify())
 	if err := json.Unmarshal(c, &config); err != nil {
 		logger.Fatalf("unable to decode config: %v", err)
 	}
