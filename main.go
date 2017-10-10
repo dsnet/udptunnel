@@ -118,7 +118,9 @@ func loadConfig(conf string) (tunn tunnel, logger *log.Logger, closer func() err
 	if err != nil {
 		logger.Fatalf("unable to read config: %v", err)
 	}
-	c, _ = jsonfmt.Format(c, jsonfmt.Minify())
+	if c, err = jsonfmt.Format(c, jsonfmt.Standardize()); err != nil {
+		logger.Fatalf("unable to parse config: %v", err)
+	}
 	if err := json.Unmarshal(c, &config); err != nil {
 		logger.Fatalf("unable to decode config: %v", err)
 	}
