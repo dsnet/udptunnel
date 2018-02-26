@@ -113,16 +113,19 @@ func (t tunnel) run(ctx context.Context) {
 	// TUN device and UDP socket have been set up. However, there is no good
 	// support for doing so currently: https://golang.org/issue/1435
 
-	// Since the remote address could change due to updates to DNS,
-	// start goroutine to periodically check DNS for a new address.
+	// On the client, start some goroutines to accommodate for the dynamically
+	// changing environment that the client may be in.
+	magic := md5.Sum([]byte(t.magic))
 	if !t.server {
+		// Since the remote address could change due to updates to DNS,
+		// periodically check DNS for a new address.
 		raddr, err := net.ResolveUDPAddr("udp", t.netAddr)
 		if err != nil {
 			t.log.Fatalf("error resolving address: %v", err)
 		}
 		t.updateRemoteAddr(raddr)
 		go func() {
-			ticker := time.NewTicker(time.Minute)
+			ticker := time.NewTicker(30 * time.Second)
 			defer ticker.Stop()
 			for range ticker.C {
 				raddr, _ := net.ResolveUDPAddr("udp", t.netAddr)
@@ -132,12 +135,30 @@ func (t tunnel) run(ctx context.Context) {
 				t.updateRemoteAddr(raddr)
 			}
 		}()
+
+		// Since the local address could change due to switching interfaces
+		// (e.g., switching from cellular hotspot to hardwire ethernet),
+		// periodically ping the server to inform it of our new UDP address.
+		// Sending a packet with only the magic header is sufficient.
+		go func() {
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				if isDone(ctx) {
+					return
+				}
+				raddr := t.loadRemoteAddr()
+				if raddr == nil {
+					continue
+				}
+				sock.WriteToUDP(magic[:], raddr)
+			}
+		}()
 	}
 
 	if t.testReady != nil {
 		close(t.testReady)
 	}
-	magic := md5.Sum([]byte(t.magic))
 	pf := newPortFilter(t.ports)
 	pl := newPacketLogger(ctx, &wg, t.log)
 
@@ -202,20 +223,23 @@ func (t tunnel) run(ctx context.Context) {
 			}
 			p := b[len(magic):n]
 
-			if pf.Filter(p, inbound) {
-				if t.testDrop != nil {
-					t.testDrop <- append([]byte(nil), p...)
-				}
-				pl.Log(p, inbound, true)
-				continue
-			}
-
 			// We assume a matching magic prefix is sufficient to validate
 			// that the new IP is really the remote endpoint.
 			// We assume that any adversary capable of performing a replay
 			// attack already has the power to disrupt communication.
 			if t.server {
 				t.updateRemoteAddr(raddr)
+			}
+			if len(p) == 0 {
+				continue // Assume empty packets are a form of pinging
+			}
+
+			if pf.Filter(p, inbound) {
+				if t.testDrop != nil {
+					t.testDrop <- append([]byte(nil), p...)
+				}
+				pl.Log(p, inbound, true)
+				continue
 			}
 
 			if _, err := iface.Write(p); err != nil {
