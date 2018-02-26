@@ -170,7 +170,9 @@ func (t tunnel) run(ctx context.Context) {
 				if isDone(ctx) {
 					return
 				}
-				t.log.Fatalf("net write error: %v", err)
+				t.log.Printf("net write error: %v", err)
+				time.Sleep(time.Second)
+				continue
 			}
 			pl.Log(p, outbound, false)
 		}
@@ -187,7 +189,9 @@ func (t tunnel) run(ctx context.Context) {
 				if isDone(ctx) {
 					return
 				}
-				t.log.Fatalf("net read error: %v", err)
+				t.log.Printf("net read error: %v", err)
+				time.Sleep(time.Second)
+				continue
 			}
 			if !bytes.HasPrefix(b[:n], magic[:]) {
 				if t.testDrop != nil {
