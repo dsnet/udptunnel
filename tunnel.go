@@ -10,6 +10,9 @@ import (
 	"crypto/md5"
 	"net"
 	"os/exec"
+	"reflect"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -31,12 +34,13 @@ type logger interface {
 }
 
 type tunnel struct {
-	server  bool
-	tunDev  string
-	tunAddr string
-	netAddr string
-	ports   []uint16
-	magic   string
+	server        bool
+	tunDevName    string
+	tunLocalAddr  string
+	tunRemoteAddr string
+	netAddr       string
+	ports         []uint16
+	magic         string
 
 	log logger
 
@@ -60,20 +64,37 @@ func (t tunnel) run(ctx context.Context) {
 	defer wg.Wait()
 
 	// Create a new tunnel device (requires root privileges).
-	iface, err := water.NewTUN(t.tunDev)
+	conf := water.Config{DeviceType: water.TUN}
+	if runtime.GOOS == "linux" && t.tunDevName != "" {
+		// Use reflect to avoid separate build file for linux-only.
+		reflect.ValueOf(&conf).Elem().FieldByName("Name").SetString(t.tunDevName)
+	}
+	iface, err := water.New(conf)
 	if err != nil {
 		t.log.Fatalf("error creating tun device: %v", err)
 	}
-	defer pingIface(&wg, t.tunAddr)
+	t.log.Printf("created tun device: %v", iface.Name())
 	defer iface.Close()
-	if err := exec.Command("/sbin/ip", "link", "set", "dev", t.tunDev, "mtu", "1300").Run(); err != nil {
-		t.log.Fatalf("ip link error: %v", err)
-	}
-	if err := exec.Command("/sbin/ip", "addr", "add", t.tunAddr+"/24", "dev", t.tunDev).Run(); err != nil {
-		t.log.Fatalf("ip addr error: %v", err)
-	}
-	if err := exec.Command("/sbin/ip", "link", "set", "dev", t.tunDev, "up").Run(); err != nil {
-		t.log.Fatalf("ip link error: %v", err)
+	defer pingIface(t.tunLocalAddr)
+
+	// Setup IP properties.
+	switch runtime.GOOS {
+	case "linux":
+		if err := exec.Command("/sbin/ip", "link", "set", "dev", iface.Name(), "mtu", "1300").Run(); err != nil {
+			t.log.Fatalf("ip link error: %v", err)
+		}
+		if err := exec.Command("/sbin/ip", "addr", "add", t.tunLocalAddr+"/24", "dev", iface.Name()).Run(); err != nil {
+			t.log.Fatalf("ip addr error: %v", err)
+		}
+		if err := exec.Command("/sbin/ip", "link", "set", "dev", iface.Name(), "up").Run(); err != nil {
+			t.log.Fatalf("ip link error: %v", err)
+		}
+	case "darwin":
+		if err := exec.Command("/sbin/ifconfig", iface.Name(), "mtu", "1300", t.tunLocalAddr, t.tunRemoteAddr, "up").Run(); err != nil {
+			t.log.Fatalf("ifconfig error: %v", err)
+		}
+	default:
+		t.log.Fatalf("no tun support for: %v", runtime.GOOS)
 	}
 
 	// Create a new UDP socket.
@@ -220,7 +241,7 @@ func (t *tunnel) updateRemoteAddr(addr *net.UDPAddr) {
 
 // pingIface sends a broadcast ping to the IP range of the TUN device
 // until the TUN device has shutdown.
-func pingIface(wg *sync.WaitGroup, addr string) {
+func pingIface(addr string) {
 	// HACK(dsnet): For reasons I do not understand, closing the TUN device
 	// does not cause a pending Read operation to become unblocked and return
 	// with some EOF error. As a workaround, we broadcast on the IP range
@@ -228,11 +249,13 @@ func pingIface(wg *sync.WaitGroup, addr string) {
 	// The subsequent call to Read will properly report that it is closed.
 	//
 	// See https://github.com/songgao/water/issues/22
-	addr = strings.TrimRight(addr, "0123456798") + "255"
-	cmd := exec.Command("/bin/ping", "-c", "1", "-b", addr)
-	cmd.Start()
-	wg.Wait()
-	cmd.Process.Kill()
+	go func() {
+		addr = strings.TrimRight(addr, "0123456798")
+		for i := 0; i < 256; i++ {
+			cmd := exec.Command("ping", "-c", "1", addr+strconv.Itoa(i))
+			cmd.Start()
+		}
+	}()
 }
 
 func isDone(ctx context.Context) bool {

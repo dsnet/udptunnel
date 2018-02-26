@@ -50,6 +50,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"runtime"
 	"syscall"
 
 	"github.com/dsnet/golib/jsonfmt"
@@ -59,21 +60,35 @@ import (
 var version string
 
 type TunnelConfig struct {
-	// LogFile is where the tunnel daemon will direct its output log.
-	// If the path is empty, then the server will output to os.Stderr.
+	// LogFile is where the tunnel daemon directs its output log.
+	// If the path is empty, then the server outputs to os.Stderr.
 	LogFile string `json:",omitempty"`
 
-	// TunnelDevice is the name of the TUN device (default: "tunnel").
+	// TunnelDevice is the name of the TUN device.
+	//
+	// This field is optional on Linux, and ignored on Darwin.
+	// The default value is some device name assigned by the operating system.
 	TunnelDevice string
 
-	// TunnelAddress is the private IPv4 address for the tunnel.
+	// TunnelAddress is the private IPv4 address for the local endpoint.
 	// The client and server should have different IP addresses both in the
 	// 255.255.255.0 subnet mask.
-	// The default value is 10.0.0.1 for the server and 10.0.0.2 for the client.
+	//
+	// This field is required on both Linux and Darwin.
+	// Recommended values are 10.0.0.1 and 10.0.0.2 for the server and client.
 	TunnelAddress string
 
+	// TunnelPeerAddress is the private IPv4 address for the remote endpoint.
+	// The client and server should have different IP addresses both in the
+	// 255.255.255.0 subnet mask.
+	//
+	// This field is ignored on Linux, and required on Darwin.
+	// On Darwin, the recommended value is 10.0.0.1 or 10.0.0.2,
+	// depending on which value does not conflict with the local TunnelAddress.
+	TunnelPeerAddress string
+
 	// NetworkAddress is the public host and port for UDP traffic.
-	// If the host portion is empty, then the daemon is operting operating in
+	// If the host portion is empty, then the daemon is operating in
 	// server mode and will bind on the specified port (e.g., ":8000").
 	// Otherwise, the daemon is operating in client mode and will use the
 	// specified host to communicate with the server (e.g., "example.com:8000").
@@ -124,18 +139,17 @@ func loadConfig(conf string) (tunn tunnel, logger *log.Logger, closer func() err
 	if err := json.Unmarshal(c, &config); err != nil {
 		logger.Fatalf("unable to decode config: %v", err)
 	}
-	if config.TunnelDevice == "" {
-		config.TunnelDevice = "tunnel"
+	if config.TunnelAddress == "" {
+		logger.Fatal("required TunnelAddress field must be specified")
+	}
+	if config.TunnelPeerAddress == "" && runtime.GOOS == "darwin" {
+		logger.Fatal("required TunnelPeerAddress field must be specified on darwin")
+	}
+	if config.TunnelAddress == config.TunnelPeerAddress {
+		logger.Fatal("TunnelAddress and TunnelPeerAddress must not conflict")
 	}
 	host, _, _ := net.SplitHostPort(config.NetworkAddress)
 	serverMode := host == ""
-	if config.TunnelAddress == "" {
-		if serverMode {
-			config.TunnelAddress = "10.0.0.1"
-		} else {
-			config.TunnelAddress = "10.0.0.2"
-		}
-	}
 
 	// Print the configuration.
 	var b bytes.Buffer
@@ -174,13 +188,14 @@ func loadConfig(conf string) (tunn tunnel, logger *log.Logger, closer func() err
 		logger.Fatalf("no allowed ports specified")
 	}
 	tunn = tunnel{
-		server:  serverMode,
-		tunDev:  config.TunnelDevice,
-		tunAddr: config.TunnelAddress,
-		netAddr: config.NetworkAddress,
-		ports:   config.AllowedPorts,
-		magic:   config.PacketMagic,
-		log:     logger,
+		server:        serverMode,
+		tunDevName:    config.TunnelDevice,
+		tunLocalAddr:  config.TunnelAddress,
+		tunRemoteAddr: config.TunnelPeerAddress,
+		netAddr:       config.NetworkAddress,
+		ports:         config.AllowedPorts,
+		magic:         config.PacketMagic,
+		log:           logger,
 	}
 	return tunn, logger, closer
 }

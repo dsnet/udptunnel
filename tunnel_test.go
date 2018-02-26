@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -35,6 +36,9 @@ func (t testLogger) Printf(f string, x ...interface{}) { t.Logf(f, x...) }
 func TestTunnel(t *testing.T) {
 	if os.Getuid() != 0 {
 		t.Skip("need root privileges")
+	}
+	if runtime.GOOS != "linux" {
+		t.Skip("tests currently work only on linux")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -61,14 +65,14 @@ func TestTunnel(t *testing.T) {
 	go func() {
 		defer close(chanDrop)
 		tunn := tunnel{
-			server:    true,
-			tunDev:    "test0",
-			tunAddr:   "10.0.10.1",
-			netAddr:   fmt.Sprintf(":%d", addrLocal.Port),
-			ports:     []uint16{uint16(addrSpecified.Port)},
-			log:       testLogger{t},
-			testReady: chanReady,
-			testDrop:  chanDrop,
+			server:        true,
+			tunLocalAddr:  "10.0.10.1",
+			tunRemoteAddr: "10.0.10.2",
+			netAddr:       fmt.Sprintf(":%d", addrLocal.Port),
+			ports:         []uint16{uint16(addrSpecified.Port)},
+			log:           testLogger{t},
+			testReady:     chanReady,
+			testDrop:      chanDrop,
 		}
 		tunn.run(ctx)
 	}()
