@@ -41,6 +41,7 @@ type tunnel struct {
 	netAddr       string
 	ports         []uint16
 	magic         string
+	beatInterval  time.Duration
 
 	log logger
 
@@ -113,6 +114,12 @@ func (t tunnel) run(ctx context.Context) {
 	// TUN device and UDP socket have been set up. However, there is no good
 	// support for doing so currently: https://golang.org/issue/1435
 
+	if t.testReady != nil {
+		close(t.testReady)
+	}
+	pf := newPortFilter(t.ports)
+	pl := newPacketLogger(ctx, &wg, t.log)
+
 	// On the client, start some goroutines to accommodate for the dynamically
 	// changing environment that the client may be in.
 	magic := md5.Sum([]byte(t.magic))
@@ -141,26 +148,28 @@ func (t tunnel) run(ctx context.Context) {
 		// periodically ping the server to inform it of our new UDP address.
 		// Sending a packet with only the magic header is sufficient.
 		go func() {
-			ticker := time.NewTicker(30 * time.Second)
+			if t.beatInterval == 0 {
+				return
+			}
+			ticker := time.NewTicker(t.beatInterval)
 			defer ticker.Stop()
+			var prevTxn uint64
 			for range ticker.C {
-				if isDone(ctx) {
+				if isDone(ctx) { // Stop if done.
 					return
 				}
 				raddr := t.loadRemoteAddr()
-				if raddr == nil {
+				if raddr == nil { // Skip if no remote endpoint.
 					continue
 				}
-				sock.WriteToUDP(magic[:], raddr)
+				txn := pl.Stats().Tx.Okay.Count
+				if prevTxn == txn { // Only send if there is no outbound traffic
+					sock.WriteToUDP(magic[:], raddr)
+				}
+				prevTxn = txn
 			}
 		}()
 	}
-
-	if t.testReady != nil {
-		close(t.testReady)
-	}
-	pf := newPortFilter(t.ports)
-	pl := newPacketLogger(ctx, &wg, t.log)
 
 	// Handle outbound traffic.
 	wg.Add(1)

@@ -52,6 +52,7 @@ import (
 	"path"
 	"runtime"
 	"syscall"
+	"time"
 
 	"github.com/dsnet/golib/jsonfmt"
 )
@@ -102,6 +103,15 @@ type TunnelConfig struct {
 	// The set of allowed ports must match on both the client and server.
 	AllowedPorts []uint16
 
+	// HeartbeatInterval is the amount of time in seconds without any
+	// outbound traffic to wait before the tunnel client will send a heartbeat
+	// message to the server. In the event that the client's address changed,
+	// this informs the server of the new client address.
+	//
+	// This field only applies to the client.
+	// The default value is 30.
+	HeartbeatInterval *uint
+
 	// PacketMagic is used to generate a sequence of bytes that is prepended to
 	// every TUN packet sent over UDP. Only inbound messages carrying the
 	// magic sequence will be accepted. This mechanism is used as a trivial way
@@ -147,6 +157,10 @@ func loadConfig(conf string) (tunn tunnel, logger *log.Logger, closer func() err
 	}
 	if config.TunnelAddress == config.TunnelPeerAddress {
 		logger.Fatal("TunnelAddress and TunnelPeerAddress must not conflict")
+	}
+	if config.HeartbeatInterval == nil {
+		config.HeartbeatInterval = new(uint)
+		*config.HeartbeatInterval = 30
 	}
 	host, _, _ := net.SplitHostPort(config.NetworkAddress)
 	serverMode := host == ""
@@ -195,6 +209,7 @@ func loadConfig(conf string) (tunn tunnel, logger *log.Logger, closer func() err
 		netAddr:       config.NetworkAddress,
 		ports:         config.AllowedPorts,
 		magic:         config.PacketMagic,
+		beatInterval:  time.Second * time.Duration(*config.HeartbeatInterval),
 		log:           logger,
 	}
 	return tunn, logger, closer

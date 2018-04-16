@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dsnet/golib/unitconv"
@@ -20,7 +21,7 @@ type packetLogger struct {
 	last   time.Time // Last time we printed statistics
 	c      chan packetLog
 	m      map[packetLog]packetCount
-	rx, tx struct{ okay, drop packetCount }
+	rx, tx struct{ okay, drop packetCount } // Atomically updated
 }
 
 type packetLog struct {
@@ -74,6 +75,22 @@ func (pl *packetLogger) Log(b []byte, d direction, dropped bool) {
 	pl.c <- p
 }
 
+// Stats returns statistics on the total number and sizes of packets
+// transmitted or received.
+func (pl *packetLogger) Stats() (s struct {
+	Rx, Tx struct{ Okay, Drop struct{ Count, Sizes uint64 } }
+}) {
+	s.Tx.Okay.Count = atomic.LoadUint64(&pl.tx.okay.count)
+	s.Tx.Okay.Sizes = atomic.LoadUint64(&pl.tx.okay.sizes)
+	s.Rx.Okay.Count = atomic.LoadUint64(&pl.rx.okay.count)
+	s.Rx.Okay.Sizes = atomic.LoadUint64(&pl.rx.okay.sizes)
+	s.Tx.Drop.Count = atomic.LoadUint64(&pl.tx.drop.count)
+	s.Tx.Drop.Sizes = atomic.LoadUint64(&pl.tx.drop.sizes)
+	s.Rx.Drop.Count = atomic.LoadUint64(&pl.rx.drop.count)
+	s.Rx.Drop.Sizes = atomic.LoadUint64(&pl.rx.drop.sizes)
+	return
+}
+
 func (pl *packetLogger) monitor(ctx context.Context) {
 	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
@@ -81,12 +98,30 @@ func (pl *packetLogger) monitor(ctx context.Context) {
 	for {
 		select {
 		case p := <-pl.c:
-			size := p.length
+			size := uint64(p.length)
+
+			// Update fine-granularity statistics.
 			p.length = 0
 			pc := pl.m[p]
 			pc.count++
-			pc.sizes += uint64(size)
+			pc.sizes += size
 			pl.m[p] = pc
+
+			// Update total packet statistics.
+			switch {
+			case !p.dropped && p.direction == outbound:
+				atomic.AddUint64(&pl.tx.okay.count, 1)
+				atomic.AddUint64(&pl.tx.okay.sizes, size)
+			case !p.dropped && p.direction == inbound:
+				atomic.AddUint64(&pl.rx.okay.count, 1)
+				atomic.AddUint64(&pl.rx.okay.sizes, size)
+			case p.dropped && p.direction == outbound:
+				atomic.AddUint64(&pl.tx.drop.count, 1)
+				atomic.AddUint64(&pl.tx.drop.sizes, size)
+			case p.dropped && p.direction == inbound:
+				atomic.AddUint64(&pl.rx.drop.count, 1)
+				atomic.AddUint64(&pl.rx.drop.sizes, size)
+			}
 		case <-t.C:
 			var count, sizes uint64
 			for _, v := range pl.m {
@@ -113,19 +148,6 @@ func (pl *packetLogger) print() {
 	stats := make([]string, 2) // First 2 lines for total stats
 	protoNames := map[int]string{icmp: "ICMP", udp: "UDP", tcp: "TCP"}
 	for k, v := range pl.m {
-		var pc *packetCount
-		switch {
-		case !k.dropped && k.direction == outbound:
-			pc = &pl.tx.okay
-		case !k.dropped && k.direction == inbound:
-			pc = &pl.rx.okay
-		case k.dropped && k.direction == outbound:
-			pc = &pl.tx.drop
-		case k.dropped && k.direction == inbound:
-			pc = &pl.rx.drop
-		}
-		pc.count += v.count
-		pc.sizes += v.sizes
 
 		proto := protoNames[k.ipProtocol]
 		if proto == "" {
@@ -142,10 +164,12 @@ func (pl *packetLogger) print() {
 		stats = append(stats, fmt.Sprintf("\tIPv%d/%s %s - %cx %d %spackets (%sB)",
 			k.ipVersion, proto, link, k.direction, v.count, drop, formatIEC(v.sizes)))
 	}
+
+	s := pl.Stats()
 	stats[0] = fmt.Sprintf("\tRx %d total packets (%sB), dropped %d total packets (%sB)",
-		pl.rx.okay.count, formatIEC(pl.rx.okay.sizes), pl.rx.drop.count, formatIEC(pl.rx.drop.sizes))
+		s.Rx.Okay.Count, formatIEC(s.Rx.Okay.Sizes), s.Rx.Drop.Count, formatIEC(s.Rx.Drop.Sizes))
 	stats[1] = fmt.Sprintf("\tTx %d total packets (%sB), dropped %d total packets (%sB)",
-		pl.tx.okay.count, formatIEC(pl.tx.okay.sizes), pl.tx.drop.count, formatIEC(pl.tx.drop.sizes))
+		s.Tx.Okay.Count, formatIEC(s.Tx.Okay.Sizes), s.Tx.Drop.Count, formatIEC(s.Tx.Drop.Sizes))
 	sort.Strings(stats[2:])
 	period := time.Now().Round(time.Second).Sub(pl.last)
 	pl.logger.Printf("Packet statistics (%v):\n%s", period, strings.Join(stats, "\n"))
