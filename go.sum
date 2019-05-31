@@ -1,0 +1,10 @@
+github.com/dsnet/golib/jsonfmt v0.0.0-20190531212259-571cdbcff553 h1:Bi/O5lX6jDDsgZfNr4LSZuDajpPF5Q5UiVcwe48Mdok=
+github.com/dsnet/golib/jsonfmt v0.0.0-20190531212259-571cdbcff553/go.mod h1:C0/DCakJBCSVJ3mWBjDVzym2Wf7w5hpvwgHCwI/M7/w=
+github.com/dsnet/golib/unitconv v0.0.0-20190531212259-571cdbcff553 h1:mE6azeVhLnKfk6DH3Zcg56L87yJ/uv9HZ5YJOQcPC4s=
+github.com/dsnet/golib/unitconv v0.0.0-20190531212259-571cdbcff553/go.mod h1:86KTUtTJFLreKjc4sS9xE0rhj4lR44Ox0rEQSEXSWwM=
+github.com/google/go-cmp v0.3.0 h1:crn/baboCvb5fXaQ0IJ1SGTsTVrWpDsCWC8EGETZijY=
+github.com/google/go-cmp v0.3.0/go.mod h1:8QqcDgzrUqlUb/G2PQTWiueGozuR1884gddMywk6iLU=
+github.com/songgao/water v0.0.0-20190402020555-6ad6edefb15c h1:VZsL/fAl8XnHj5Zn+cRvLcFbMHmCj7tdPrkKZSRziJ0=
+github.com/songgao/water v0.0.0-20190402020555-6ad6edefb15c/go.mod h1:P5HUIBuIWKbyjl083/loAegFkfbFNx5i2qEP4CNbm7E=
+golang.org/x/sys v0.0.0-20190531175056-4c3a928424d2 h1:T5DasATyLQfmbTpfEXx/IOL9vfjzW6up+ZDkmHvIf2s=
+golang.org/x/sys v0.0.0-20190531175056-4c3a928424d2/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
